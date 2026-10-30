@@ -1,19 +1,16 @@
 {
-	"name": "telegram-bot",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
-	"scripts": {
-		"start": "node index.js",
-		"dev": "nodemon index.js"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "ISC",
-	"devDependencies": {
-		"nodemon": "^3.0.1"
-	},
-	"dependencies": {
-		"node-telegram-bot-api": "^0.61.0"
-	}
+  "name": "maktab-sport-bot",
+  "version": "1.0.0",
+  "description": "Maktab sport to'garaklari Telegram boti",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.0.0",
+    "telegraf": "^4.16.3"
+  }
 }
