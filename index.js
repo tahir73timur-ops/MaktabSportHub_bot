@@ -45,26 +45,63 @@ if (!hasCol('districts', 'region_id')) db.exec('ALTER TABLE districts ADD COLUMN
 if (!hasCol('users', 'birth_year')) db.exec('ALTER TABLE users ADD COLUMN birth_year INT');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_district ON districts(region_id, name)');
 
-// Boshlang'ich ma'lumotlar: O'zbekiston viloyatlari va Toshkent shahri tumanlari
+// Boshlang'ich ma'lumotlar: O'zbekiston viloyatlari, Toshkent va Namangan tumanlari
 const REGIONS = [
   "Qoraqalpog'iston Respublikasi", 'Toshkent shahri', 'Toshkent viloyati', 'Andijon viloyati',
   'Buxoro viloyati', "Farg'ona viloyati", 'Jizzax viloyati', 'Namangan viloyati', 'Navoiy viloyati',
   'Qashqadaryo viloyati', 'Samarqand viloyati', 'Sirdaryo viloyati', 'Surxondaryo viloyati', 'Xorazm viloyati',
 ];
+
 const TASHKENT_DISTRICTS = [
   'Bektemir', 'Chilonzor', 'Yakkasaroy', 'Yashnobod', 'Mirobod', "Mirzo Ulug'bek",
   'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot',
 ];
+
+// Namangan viloyati tumanlari va Pop tumani markaziy maktablari / filiallari
+const NAMANGAN_DISTRICTS = [
+  'Pop tumani', 'Namangan shahri', 'Chust tumani', 'Uychi tumani', 
+  'Uchqoʻrgʻon tumani', 'Mingbuloq tumani', 'Kosonsoy tumani', 
+  'Toʻraqoʻrgʻon tumani', 'Norin tumani', 'Yangiqoʻrgʻon tumani', 'Chortoq tumani'
+];
+
 if (!db.prepare('SELECT 1 FROM regions').get()) {
   const insR = db.prepare('INSERT OR IGNORE INTO regions(name) VALUES(?)');
   db.transaction(() => REGIONS.forEach((r) => insR.run(r)))();
 }
+
 const tash = db.prepare("SELECT id FROM regions WHERE name='Toshkent shahri'").get();
 if (tash) {
-  db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); // eski bazadagi tumanlar
+  db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); 
   if (!db.prepare('SELECT 1 FROM districts').get()) {
     const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
     db.transaction(() => TASHKENT_DISTRICTS.forEach((d) => insD.run(tash.id, d)))();
+  }
+}
+
+// Namangan viloyati va uning tumanlarini bazaga avtomatik qo'shish
+const namanganReg = db.prepare("SELECT id FROM regions WHERE name='Namangan viloyati'").get();
+if (namanganReg) {
+  const existingNamDistricts = db.prepare('SELECT 1 FROM districts WHERE region_id=?').get(namanganReg.id);
+  if (!existingNamDistricts) {
+    const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
+    db.transaction(() => NAMANGAN_DISTRICTS.forEach((d) => insD.run(namanganReg.id, d)))();
+  }
+}
+
+// Pop tumani uchun boshlang'ich maktablar va markazlarni kiritib qo'shamiz
+const popDistrict = db.prepare("SELECT id FROM districts WHERE name='Pop tumani'").get();
+if (popDistrict) {
+  const existingSchools = db.prepare('SELECT 1 FROM schools WHERE district_id=?').get(popDistrict.id);
+  if (!existingSchools) {
+    const defaultPopSchools = [
+      "EduKontrol Academy (Pop)",
+      "Mirobod Center (Pop)",
+      "1-sonli umumiy o'rta ta'lim maktabi",
+      "2-sonli umumiy o'rta ta'lim maktabi",
+      "3-sonli umumiy o'rta ta'lim maktabi"
+    ];
+    const insS = db.prepare('INSERT INTO schools(district_id, name) VALUES(?, ?)');
+    db.transaction(() => defaultPopSchools.forEach((s) => insS.run(popDistrict.id, s)))();
   }
 }
 
@@ -178,7 +215,7 @@ bot.action(/^rgs:(\d+)$/, async (ctx) => {
   if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
   st.school_id = +ctx.match[1];
   st.step = 'reg_grade';
-  await safeEdit(ctx, 'Sinfingizni kiriting (masalan: 8-A):');
+  await safeEdit(ctx, 'Sinfingizni kiriting (masalan: 8-A, 9-B yoki Talaba):');
 });
 
 // ───────────────────────── 1. To'garaklar ─────────────────────────
@@ -286,7 +323,7 @@ bot.hears('🤝 Young Coach', async (ctx) => {
     let text = '🤝 Sizning Young Coach faoliyatingiz:\n';
     const rows = [];
     for (const a of mine) {
-      text += `\n• ${a.sport} — ${YC_STATUS[a.status]}, o'tkazilgan mashg'ulot: ${a.sessions}`;
+      text += `\n${a.sport} — ${YC_STATUS[a.status]}, o'tkazilgan mashg'ulot: ${a.sessions}`;
       if (a.status === 'approved') rows.push([`✅ ${a.sport}: mashg'ulot o'tkazdim`, `ycl:${a.id}`]);
     }
     await ctx.reply(text, rows.length ? inline(rows) : undefined);
@@ -530,7 +567,7 @@ bot.command('list', admin, async (ctx) => {
     text += `\n${r.id}. ${r.name}\n`;
     for (const d of all('SELECT * FROM districts WHERE region_id=? ORDER BY id', r.id)) {
       text += `   🏙 ${d.id}. ${d.name}\n`;
-      for (const sc of all('SELECT * FROM schools WHERE district_id=?', d.id)) text += `      🏫 ${sc.id}. ${sc.name}\n`;
+      for (const sc of all('SELECT * FROM schools WHERE district_id=?', d.id)) text += `     🏫 ${sc.id}. ${sc.name}\n`;
     }
   }
   text += "\n⚽ To'garaklar:\n" + all('SELECT * FROM clubs').map((c) => `${c.id}. ${c.sport} (maktab ${c.school_id})`).join('\n');
