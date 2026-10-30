@@ -2,9 +2,9 @@
   "name": "maktab-sport-bot",
   "version": "1.0.0",
   "description": "Maktab sport to'garaklari Telegram boti",
-  "main": "bot.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node $(find . -maxdepth 2 -name '*.js' -not -path './node_modules/*' | head -n 1)"
+    "start": "node index.js"
   },
   "engines": {
     "node": "22.x"
