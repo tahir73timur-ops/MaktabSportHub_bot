@@ -702,3 +702,33 @@ bot.telegram.getMe()
 console.log('Bot ishga tushmoqda...');
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+// ... oldingi bot kodlari ...
+
+bot.telegram.getMe()
+  .then((me) => {
+    console.log(`Token to'g'ri ✅  @${me.username}`);
+    return bot.launch();
+  })
+  .catch((e) => {
+    if (e.response?.error_code === 401)
+      console.error("❌ 401 Unauthorized: BOT_TOKEN noto'g'ri yoki bekor qilingan. @BotFather dan yangi token oling.");
+    else console.error('❌ Ishga tushmadi:', e.message);
+    process.exit(1);
+  });
+console.log('Bot ishga tushmoqda...');
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+// ── MANA SHU YERGA (ENG OXIRIGA) QO'YASIZ ──
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Bot ishlayapti!');
+});
+
+app.listen(PORT, () => {
+  console.log(`Server ${PORT} - portda ishga tushdi`);
+});
