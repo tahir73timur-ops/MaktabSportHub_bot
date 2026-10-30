@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS assistants(
   sessions INT DEFAULT 0, last_day TEXT, UNIQUE(user_id, club_id));
 `);
 
+// Boshlang'ich hududlar: baza bo'sh bo'lsa, Toshkent shahri tumanlari avtomatik qo'shiladi
+const DEFAULT_DISTRICTS = [
+  'Bektemir', 'Chilonzor', 'Yakkasaroy', 'Yashnobod', 'Mirobod', "Mirzo Ulug'bek",
+  'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot',
+];
+if (!db.prepare('SELECT 1 FROM districts').get()) {
+  const ins = db.prepare('INSERT OR IGNORE INTO districts(name) VALUES(?)');
+  db.transaction(() => DEFAULT_DISTRICTS.forEach((d) => ins.run(d)))();
+}
+
 const all = (sql, ...a) => db.prepare(sql).all(...a);
 const one = (sql, ...a) => db.prepare(sql).get(...a);
 const run = (sql, ...a) => db.prepare(sql).run(...a);
@@ -451,6 +461,7 @@ bot.command('admin', admin, (ctx) =>
   ctx.reply(
     '👑 Admin buyruqlari:\n\n' +
     '/add_district Chilonzor\n' +
+    '/add_districts Hudud1, Hudud2, Hudud3\n' +
     '/add_school <hudud_id> | <maktab nomi>\n' +
     '/add_club <maktab_id> | sport | kunlar | murabbiy | telefon\n' +
     '/add_comp <hudud_id> | nomi | YYYY-MM-DD | joyi | sport\n' +
@@ -472,6 +483,14 @@ bot.command('add_district', admin, (ctx) => {
   if (!name) return ctx.reply('Format: /add_district Nomi');
   run('INSERT OR IGNORE INTO districts(name) VALUES(?)', name);
   ctx.reply("✅ Qo'shildi. /list");
+});
+
+bot.command('add_districts', admin, (ctx) => {
+  const names = argsOf(ctx).split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+  if (!names.length) return ctx.reply('Format: /add_districts Chilonzor, Yunusobod, Sergeli');
+  let added = 0;
+  for (const n of names) added += run('INSERT OR IGNORE INTO districts(name) VALUES(?)', n.slice(0, 60)).changes;
+  ctx.reply(`✅ ${added} ta hudud qo'shildi (${names.length - added} tasi avvaldan bor edi). /list`);
 });
 
 bot.command('add_school', admin, (ctx) => {
