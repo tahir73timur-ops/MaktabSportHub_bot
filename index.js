@@ -19,10 +19,11 @@ if (!TOKEN) {
 // ───────────────────────── Ma'lumotlar bazasi ─────────────────────────
 const db = new Database('sport.db');
 db.exec(`
-CREATE TABLE IF NOT EXISTS districts(id INTEGER PRIMARY KEY, name TEXT UNIQUE);
+CREATE TABLE IF NOT EXISTS regions(id INTEGER PRIMARY KEY, name TEXT UNIQUE);
+CREATE TABLE IF NOT EXISTS districts(id INTEGER PRIMARY KEY, region_id INT, name TEXT);
 CREATE TABLE IF NOT EXISTS schools(id INTEGER PRIMARY KEY, district_id INT, name TEXT);
 CREATE TABLE IF NOT EXISTS users(
-  tg_id INTEGER PRIMARY KEY, full_name TEXT, school_id INT, grade TEXT, role TEXT DEFAULT 'student');
+  tg_id INTEGER PRIMARY KEY, full_name TEXT, school_id INT, grade TEXT, birth_year INT, role TEXT DEFAULT 'student');
 CREATE TABLE IF NOT EXISTS clubs(
   id INTEGER PRIMARY KEY, school_id INT, sport TEXT, days TEXT, coach TEXT, phone TEXT);
 CREATE TABLE IF NOT EXISTS members(club_id INT, user_id INT, UNIQUE(club_id, user_id));
@@ -38,14 +39,33 @@ CREATE TABLE IF NOT EXISTS assistants(
   sessions INT DEFAULT 0, last_day TEXT, UNIQUE(user_id, club_id));
 `);
 
-// Boshlang'ich hududlar: baza bo'sh bo'lsa, Toshkent shahri tumanlari avtomatik qo'shiladi
-const DEFAULT_DISTRICTS = [
+// Eski bazalar uchun yangi ustunlar
+const hasCol = (t, c) => db.prepare(`PRAGMA table_info(${t})`).all().some((x) => x.name === c);
+if (!hasCol('districts', 'region_id')) db.exec('ALTER TABLE districts ADD COLUMN region_id INT');
+if (!hasCol('users', 'birth_year')) db.exec('ALTER TABLE users ADD COLUMN birth_year INT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_district ON districts(region_id, name)');
+
+// Boshlang'ich ma'lumotlar: O'zbekiston viloyatlari va Toshkent shahri tumanlari
+const REGIONS = [
+  "Qoraqalpog'iston Respublikasi", 'Toshkent shahri', 'Toshkent viloyati', 'Andijon viloyati',
+  'Buxoro viloyati', "Farg'ona viloyati", 'Jizzax viloyati', 'Namangan viloyati', 'Navoiy viloyati',
+  'Qashqadaryo viloyati', 'Samarqand viloyati', 'Sirdaryo viloyati', 'Surxondaryo viloyati', 'Xorazm viloyati',
+];
+const TASHKENT_DISTRICTS = [
   'Bektemir', 'Chilonzor', 'Yakkasaroy', 'Yashnobod', 'Mirobod', "Mirzo Ulug'bek",
   'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot',
 ];
-if (!db.prepare('SELECT 1 FROM districts').get()) {
-  const ins = db.prepare('INSERT OR IGNORE INTO districts(name) VALUES(?)');
-  db.transaction(() => DEFAULT_DISTRICTS.forEach((d) => ins.run(d)))();
+if (!db.prepare('SELECT 1 FROM regions').get()) {
+  const insR = db.prepare('INSERT OR IGNORE INTO regions(name) VALUES(?)');
+  db.transaction(() => REGIONS.forEach((r) => insR.run(r)))();
+}
+const tash = db.prepare("SELECT id FROM regions WHERE name='Toshkent shahri'").get();
+if (tash) {
+  db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); // eski bazadagi tumanlar
+  if (!db.prepare('SELECT 1 FROM districts').get()) {
+    const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
+    db.transaction(() => TASHKENT_DISTRICTS.forEach((d) => insD.run(tash.id, d)))();
+  }
 }
 
 const all = (sql, ...a) => db.prepare(sql).all(...a);
@@ -67,8 +87,13 @@ const menu = (id) =>
 const inline = (rows, columns = 1) =>
   Markup.inlineKeyboard(rows.map(([t, d]) => Markup.button.callback(t, d)), { columns });
 
-const districtsKb = (prefix) =>
-  inline(all('SELECT * FROM districts').map((d) => [d.name, `${prefix}:${d.id}`]));
+const regionsKb = (prefix) =>
+  inline(all('SELECT * FROM regions ORDER BY id').map((r) => [r.name, `${prefix}:${r.id}`]), 2);
+const districtsKb = (prefix, rid) =>
+  inline(all('SELECT * FROM districts WHERE region_id=? ORDER BY name', rid).map((d) => [d.name, `${prefix}:${d.id}`]), 2);
+const replyLong = async (ctx, text) => {
+  for (let i = 0; i < text.length; i += 3800) await ctx.reply(text.slice(i, i + 3800));
+};
 const schoolsKb = (prefix, did) =>
   inline(all('SELECT * FROM schools WHERE district_id=?', did).map((s) => [s.name, `${prefix}:${s.id}`]));
 
@@ -131,6 +156,15 @@ bot.start((ctx) => {
   return ctx.reply("Assalomu alaykum! 🏃 Maktab sport botiga xush kelibsiz.\n\nIsm va familiyangizni kiriting:");
 });
 
+bot.action(/^rgr:(\d+)$/, async (ctx) => {
+  const st = states.get(ctx.from.id);
+  if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
+  const rid = +ctx.match[1];
+  if (!one('SELECT 1 x FROM districts WHERE region_id=?', rid))
+    return alert(ctx, 'Bu viloyatda tumanlar hali kiritilmagan. Administrator bilan bog\'laning.');
+  await safeEdit(ctx, 'Tumaningizni tanlang:', districtsKb('rgd', rid));
+});
+
 bot.action(/^rgd:(\d+)$/, async (ctx) => {
   const st = states.get(ctx.from.id);
   if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
@@ -168,7 +202,13 @@ bot.hears("🏫 To'garaklar", async (ctx) => {
   ]));
 });
 
-bot.action('dl', (ctx) => safeEdit(ctx, 'Hududni tanlang:', districtsKb('dist')));
+bot.action('dl', (ctx) => safeEdit(ctx, 'Viloyatni tanlang:', regionsKb('vil')));
+
+bot.action(/^vil:(\d+)$/, async (ctx) => {
+  const rid = +ctx.match[1];
+  if (!one('SELECT 1 x FROM districts WHERE region_id=?', rid)) return alert(ctx, 'Bu viloyatda tumanlar hali kiritilmagan.');
+  await safeEdit(ctx, 'Tumanni tanlang:', districtsKb('dist', rid));
+});
 
 bot.action(/^dist:(\d+)$/, async (ctx) => {
   const did = +ctx.match[1];
@@ -195,7 +235,7 @@ bot.hears('🏅 Sport Passport', async (ctx) => {
   const u = await needUser(ctx);
   if (!u) return;
   const school = one('SELECT name FROM schools WHERE id=?', u.school_id);
-  let text = `🏅 SPORT PASSPORT\n\n👤 ${u.full_name}\n🏫 ${school?.name ?? '-'} | ${u.grade}\n`;
+  let text = `🏅 SPORT PASSPORT\n\n👤 ${u.full_name}${u.birth_year ? ` (${new Date().getFullYear() - u.birth_year} yosh)` : ''}\n🏫 ${school?.name ?? '-'} | ${u.grade}\n`;
 
   const sports = all(
     `SELECT c.sport, SUM(a.present) att, COUNT(a.id) total
@@ -420,22 +460,36 @@ bot.on('text', async (ctx, next) => {
 
   switch (st.step) {
     case 'reg_name':
-      if (!all('SELECT 1 FROM districts').length) {
+      if (!all('SELECT 1 FROM regions').length) {
         states.delete(ctx.from.id);
         return ctx.reply('Hozircha hududlar kiritilmagan. Administrator bilan bog\'laning.');
       }
       st.name = text.slice(0, 100);
-      return ctx.reply('Hududingizni (tumanni) tanlang:', districtsKb('rgd'));
+      return ctx.reply('Viloyatingizni tanlang:', regionsKb('rgr'));
 
     case 'reg_grade':
       if (!st.name || !st.school_id) {
         states.delete(ctx.from.id);
         return ctx.reply('Sessiya tugagan. /start ni bosing.');
       }
-      run("INSERT OR REPLACE INTO users(tg_id,full_name,school_id,grade,role) VALUES(?,?,?,?,'student')",
-        ctx.from.id, st.name, st.school_id, text.slice(0, 20));
+      st.grade = text.slice(0, 20);
+      st.step = 'reg_year';
+      return ctx.reply("Tug'ilgan yilingizni kiriting (masalan: 2012):");
+
+    case 'reg_year': {
+      const year = parseInt(text, 10);
+      const now = new Date().getFullYear();
+      if (!/^\d{4}$/.test(text) || year > now - 5 || year < now - 30)
+        return ctx.reply("❌ Yil noto'g'ri. 4 xonali yilni kiriting (masalan: 2012):");
+      if (!st.name || !st.school_id || !st.grade) {
+        states.delete(ctx.from.id);
+        return ctx.reply('Sessiya tugagan. /start ni bosing.');
+      }
+      run("INSERT OR REPLACE INTO users(tg_id,full_name,school_id,grade,birth_year,role) VALUES(?,?,?,?,?,'student')",
+        ctx.from.id, st.name, st.school_id, st.grade, year);
       states.delete(ctx.from.id);
-      return ctx.reply("✅ Ro'yxatdan o'tdingiz!", menu(ctx.from.id));
+      return ctx.reply(`✅ Ro'yxatdan o'tdingiz! Yoshingiz: ${now - year}`, menu(ctx.from.id));
+    }
 
     case 'res_title':
       st.title = text.slice(0, 200);
@@ -460,43 +514,59 @@ const admin = (ctx, next) => (ADMIN_IDS.has(ctx.from.id) ? next() : undefined);
 bot.command('admin', admin, (ctx) =>
   ctx.reply(
     '👑 Admin buyruqlari:\n\n' +
-    '/add_district Chilonzor\n' +
-    '/add_districts Hudud1, Hudud2, Hudud3\n' +
-    '/add_school <hudud_id> | <maktab nomi>\n' +
+    '/add_region Nomi\n' +
+    '/add_district <viloyat_id> | Tuman nomi\n' +
+    '/add_districts <viloyat_id> | Tuman1, Tuman2\n' +
+    '/add_school <tuman_id> | <maktab nomi>\n' +
     '/add_club <maktab_id> | sport | kunlar | murabbiy | telefon\n' +
-    '/add_comp <hudud_id> | nomi | YYYY-MM-DD | joyi | sport\n' +
+    '/add_comp <tuman_id> | nomi | YYYY-MM-DD | joyi | sport\n' +
     '/set_manager <tg_id> <maktab_id>\n' +
     '/comp_regs <musobaqa_id>\n' +
-    "/list — hudud, maktab, to'garak va musobaqa ID lari"));
+    "/list — viloyat, tuman, maktab, to'garak va musobaqa ID lari"));
 
-bot.command('list', admin, (ctx) => {
-  const text =
-    'Hududlar:\n' + all('SELECT * FROM districts').map((d) => `${d.id}. ${d.name}`).join('\n') +
-    '\n\nMaktablar:\n' + all('SELECT * FROM schools').map((s) => `${s.id}. ${s.name} (hudud ${s.district_id})`).join('\n') +
-    "\n\nTo'garaklar:\n" + all('SELECT * FROM clubs').map((c) => `${c.id}. ${c.sport} (maktab ${c.school_id})`).join('\n') +
-    '\n\nMusobaqalar:\n' + all('SELECT * FROM competitions').map((c) => `${c.id}. ${c.title} (${c.day})`).join('\n');
-  ctx.reply(text);
+bot.command('list', admin, async (ctx) => {
+  let text = '🗺 Viloyat → 🏙 tuman → 🏫 maktab (ID lari bilan):\n';
+  for (const r of all('SELECT * FROM regions ORDER BY id')) {
+    text += `\n${r.id}. ${r.name}\n`;
+    for (const d of all('SELECT * FROM districts WHERE region_id=? ORDER BY id', r.id)) {
+      text += `   🏙 ${d.id}. ${d.name}\n`;
+      for (const sc of all('SELECT * FROM schools WHERE district_id=?', d.id)) text += `      🏫 ${sc.id}. ${sc.name}\n`;
+    }
+  }
+  text += "\n⚽ To'garaklar:\n" + all('SELECT * FROM clubs').map((c) => `${c.id}. ${c.sport} (maktab ${c.school_id})`).join('\n');
+  text += '\n\n🏆 Musobaqalar:\n' + all('SELECT * FROM competitions').map((c) => `${c.id}. ${c.title} (${c.day})`).join('\n');
+  await replyLong(ctx, text);
+});
+
+bot.command('add_region', admin, (ctx) => {
+  const name = argsOf(ctx);
+  if (!name) return ctx.reply('Format: /add_region Nomi');
+  run('INSERT OR IGNORE INTO regions(name) VALUES(?)', name.slice(0, 60));
+  ctx.reply("✅ Viloyat qo'shildi. /list");
 });
 
 bot.command('add_district', admin, (ctx) => {
-  const name = argsOf(ctx);
-  if (!name) return ctx.reply('Format: /add_district Nomi');
-  run('INSERT OR IGNORE INTO districts(name) VALUES(?)', name);
-  ctx.reply("✅ Qo'shildi. /list");
+  const p = pipeParts(ctx, 2);
+  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_district <viloyat_id> | Tuman nomi');
+  if (!one('SELECT 1 x FROM regions WHERE id=?', +p[0])) return ctx.reply("❌ Bunday viloyat ID yo'q. /list");
+  const r = run('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)', +p[0], p[1].slice(0, 60));
+  ctx.reply(r.changes ? "✅ Tuman qo'shildi." : 'Bu tuman avvaldan bor.');
 });
 
 bot.command('add_districts', admin, (ctx) => {
-  const names = argsOf(ctx).split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
-  if (!names.length) return ctx.reply('Format: /add_districts Chilonzor, Yunusobod, Sergeli');
+  const p = pipeParts(ctx, 2);
+  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_districts <viloyat_id> | Tuman1, Tuman2, Tuman3');
+  if (!one('SELECT 1 x FROM regions WHERE id=?', +p[0])) return ctx.reply("❌ Bunday viloyat ID yo'q. /list");
+  const names = p[1].split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
   let added = 0;
-  for (const n of names) added += run('INSERT OR IGNORE INTO districts(name) VALUES(?)', n.slice(0, 60)).changes;
-  ctx.reply(`✅ ${added} ta hudud qo'shildi (${names.length - added} tasi avvaldan bor edi). /list`);
+  for (const n of names) added += run('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)', +p[0], n.slice(0, 60)).changes;
+  ctx.reply(`✅ ${added} ta tuman qo'shildi (${names.length - added} tasi avvaldan bor edi). /list`);
 });
 
 bot.command('add_school', admin, (ctx) => {
   const p = pipeParts(ctx, 2);
-  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_school <hudud_id> | <nomi>');
-  if (!one('SELECT 1 x FROM districts WHERE id=?', +p[0])) return ctx.reply("❌ Bunday hudud ID yo'q. /list");
+  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_school <tuman_id> | <nomi>');
+  if (!one('SELECT 1 x FROM districts WHERE id=?', +p[0])) return ctx.reply("❌ Bunday tuman ID yo'q. /list");
   run('INSERT INTO schools(district_id,name) VALUES(?,?)', +p[0], p[1]);
   ctx.reply("✅ Maktab qo'shildi.");
 });
@@ -511,10 +581,10 @@ bot.command('add_club', admin, (ctx) => {
 
 bot.command('add_comp', admin, async (ctx) => {
   const p = pipeParts(ctx, 5);
-  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_comp <hudud_id> | nomi | YYYY-MM-DD | joyi | sport');
+  if (!p || !/^\d+$/.test(p[0])) return ctx.reply('Format: /add_comp <tuman_id> | nomi | YYYY-MM-DD | joyi | sport');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(p[2]) || isNaN(new Date(p[2])))
     return ctx.reply("❌ Sana formati noto'g'ri. To'g'ri: 2026-11-20");
-  if (!one('SELECT 1 x FROM districts WHERE id=?', +p[0])) return ctx.reply("❌ Bunday hudud ID yo'q. /list");
+  if (!one('SELECT 1 x FROM districts WHERE id=?', +p[0])) return ctx.reply("❌ Bunday tuman ID yo'q. /list");
   run('INSERT INTO competitions(district_id,title,day,place,sport) VALUES(?,?,?,?,?)', +p[0], p[1], p[2], p[3], p[4]);
   let sent = 0;
   for (const u of all('SELECT u.tg_id FROM users u JOIN schools s ON s.id=u.school_id WHERE s.district_id=?', +p[0])) {
