@@ -6,7 +6,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const Database = require('better-sqlite3');
 
-// Bo'sh joy va qo'shtirnoqlarni olib tashlaymiz (hostingda tez-tez uchraydigan xato)
+// Bo'sh joy va qo'shtirnoqlarni olib tashlaymiz
 const TOKEN = (process.env.BOT_TOKEN || '').trim().replace(/^["']|["']$/g, '');
 const ADMIN_IDS = new Set(
   (process.env.ADMIN_IDS || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number)
@@ -45,7 +45,7 @@ if (!hasCol('districts', 'region_id')) db.exec('ALTER TABLE districts ADD COLUMN
 if (!hasCol('users', 'birth_year')) db.exec('ALTER TABLE users ADD COLUMN birth_year INT');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_district ON districts(region_id, name)');
 
-// Boshlang'ich ma'lumotlar: O'zbekiston viloyatlari, Toshkent va Namangan tumanlari
+// Boshlang'ich ma'lumotlar: Viloyatlar
 const REGIONS = [
   "Qoraqalpog'iston Respublikasi", 'Toshkent shahri', 'Toshkent viloyati', 'Andijon viloyati',
   'Buxoro viloyati', "Farg'ona viloyati", 'Jizzax viloyati', 'Namangan viloyati', 'Navoiy viloyati',
@@ -57,52 +57,88 @@ const TASHKENT_DISTRICTS = [
   'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot',
 ];
 
-// Namangan viloyati tumanlari va Pop tumani markaziy maktablari / filiallari
-const NAMANGAN_DISTRICTS = [
-  'Pop tumani', 'Namangan shahri', 'Chust tumani', 'Uychi tumani', 
-  'Uchqoʻrgʻon tumani', 'Mingbuloq tumani', 'Kosonsoy tumani', 
-  'Toʻraqoʻrgʻon tumani', 'Norin tumani', 'Yangiqoʻrgʻon tumani', 'Chortoq tumani'
-];
+// Namangan viloyati tumanlari va ularning maktablar bazasi
+const NAMANGAN_DATA = {
+  'Pop tumani': [
+    'EduKontrol Academy (Pop)',
+    'Mirobod Center (Pop)',
+    ...Array.from({ length: 55 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
+    'Pop tuman 1-sonli Ixtisoslashtirilgan maktab'
+  ],
+  'Namangan shahri': [
+    ...Array.from({ length: 85 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
+    'Namangan shahar Prezident maktabi',
+    '1-sonli IDUM'
+  ],
+  'Chust tumani': [
+    ...Array.from({ length: 70 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
+    'Chust tuman Ixtisoslashtirilgan maktab'
+  ],
+  'Uychi tumani': [
+    ...Array.from({ length: 50 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Uchqoʻrgʻon tumani': [
+    ...Array.from({ length: 45 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Mingbuloq tumani': [
+    ...Array.from({ length: 40 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Kosonsoy tumani': [
+    ...Array.from({ length: 60 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Toʻraqoʻrgʻon tumani': [
+    ...Array.from({ length: 55 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Norin tumani': [
+    ...Array.from({ length: 42 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Yangiqoʻrgʻon tumani': [
+    ...Array.from({ length: 65 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Chortoq tumani': [
+    ...Array.from({ length: 58 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Davlatobod tumani': [
+    ...Array.from({ length: 25 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ],
+  'Yangi Namangan tumani': [
+    ...Array.from({ length: 20 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
+  ]
+};
 
 if (!db.prepare('SELECT 1 FROM regions').get()) {
   const insR = db.prepare('INSERT OR IGNORE INTO regions(name) VALUES(?)');
   db.transaction(() => REGIONS.forEach((r) => insR.run(r)))();
 }
 
+// Toshkent shahrini kiritish
 const tash = db.prepare("SELECT id FROM regions WHERE name='Toshkent shahri'").get();
 if (tash) {
   db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); 
-  if (!db.prepare('SELECT 1 FROM districts').get()) {
+  if (!db.prepare('SELECT 1 FROM districts WHERE region_id=?').get(tash.id)) {
     const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
     db.transaction(() => TASHKENT_DISTRICTS.forEach((d) => insD.run(tash.id, d)))();
   }
 }
 
-// Namangan viloyati va uning tumanlarini bazaga avtomatik qo'shish
+// Namangan viloyati va uning barcha tuman va maktablarini avtomatik joylash
 const namanganReg = db.prepare("SELECT id FROM regions WHERE name='Namangan viloyati'").get();
 if (namanganReg) {
-  const existingNamDistricts = db.prepare('SELECT 1 FROM districts WHERE region_id=?').get(namanganReg.id);
-  if (!existingNamDistricts) {
-    const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
-    db.transaction(() => NAMANGAN_DISTRICTS.forEach((d) => insD.run(namanganReg.id, d)))();
-  }
-}
+  const insDist = db.prepare('INSERT OR IGNORE INTO districts(region_id, name) VALUES(?, ?)');
+  const insSch = db.prepare('INSERT INTO schools(district_id, name) VALUES(?, ?)');
 
-// Pop tumani uchun boshlang'ich maktablar va markazlarni kiritib qo'shamiz
-const popDistrict = db.prepare("SELECT id FROM districts WHERE name='Pop tumani'").get();
-if (popDistrict) {
-  const existingSchools = db.prepare('SELECT 1 FROM schools WHERE district_id=?').get(popDistrict.id);
-  if (!existingSchools) {
-    const defaultPopSchools = [
-      "EduKontrol Academy (Pop)",
-      "Mirobod Center (Pop)",
-      "1-sonli umumiy o'rta ta'lim maktabi",
-      "2-sonli umumiy o'rta ta'lim maktabi",
-      "3-sonli umumiy o'rta ta'lim maktabi"
-    ];
-    const insS = db.prepare('INSERT INTO schools(district_id, name) VALUES(?, ?)');
-    db.transaction(() => defaultPopSchools.forEach((s) => insS.run(popDistrict.id, s)))();
-  }
+  db.transaction(() => {
+    for (const [distName, schoolList] of Object.entries(NAMANGAN_DATA)) {
+      insDist.run(namanganReg.id, distName);
+      const dist = db.prepare('SELECT id FROM districts WHERE region_id=? AND name=?').get(namanganReg.id, distName);
+      if (dist) {
+        const hasSchools = db.prepare('SELECT 1 FROM schools WHERE district_id=?').get(dist.id);
+        if (!hasSchools) {
+          schoolList.forEach((schName) => insSch.run(dist.id, schName));
+        }
+      }
+    }
+  })();
 }
 
 const all = (sql, ...a) => db.prepare(sql).all(...a);
@@ -132,7 +168,7 @@ const replyLong = async (ctx, text) => {
   for (let i = 0; i < text.length; i += 3800) await ctx.reply(text.slice(i, i + 3800));
 };
 const schoolsKb = (prefix, did) =>
-  inline(all('SELECT * FROM schools WHERE district_id=?', did).map((s) => [s.name, `${prefix}:${s.id}`]));
+  inline(all('SELECT * FROM schools WHERE district_id=?', did).map((s) => [s.name, `${prefix}:${s.id}`]), 2);
 
 const states = new Map(); // tg_id -> { step, ...data }
 
@@ -215,7 +251,7 @@ bot.action(/^rgs:(\d+)$/, async (ctx) => {
   if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
   st.school_id = +ctx.match[1];
   st.step = 'reg_grade';
-  await safeEdit(ctx, 'Sinfingizni kiriting (masalan: 8-A, 9-B yoki Talaba):');
+  await safeEdit(ctx, 'Sinfingizni kiriting (masalan: 8-A, 10-B yoki Oʻqituvchi):');
 });
 
 // ───────────────────────── 1. To'garaklar ─────────────────────────
@@ -489,7 +525,7 @@ bot.action(/^rk:(result|achievement)$/, async (ctx) => {
   await safeEdit(ctx, 'Musobaqa / yutuq nomini yozing (bekor qilish: /cancel):');
 });
 
-// ───────────────────────── Matnli javoblar (holatlar) ─────────────────────────
+// ───────────────────────── Matnli javoblar ─────────────────────────
 bot.on('text', async (ctx, next) => {
   const st = states.get(ctx.from.id);
   const text = ctx.message.text.trim();
@@ -626,7 +662,7 @@ bot.command('add_comp', admin, async (ctx) => {
   let sent = 0;
   for (const u of all('SELECT u.tg_id FROM users u JOIN schools s ON s.id=u.school_id WHERE s.district_id=?', +p[0])) {
     if (await safeSend(u.tg_id, `🏆 Yangi musobaqa e'lon qilindi: ${p[1]} (${p[2]}). «Open Competition» bo'limidan yoziling!`)) sent++;
-    await new Promise((r) => setTimeout(r, 50)); // Telegram limitiga tushmaslik uchun
+    await new Promise((r) => setTimeout(r, 50));
   }
   ctx.reply(`✅ Musobaqa e'lon qilindi. Xabar ${sent} ta o'quvchiga yuborildi.`);
 });
