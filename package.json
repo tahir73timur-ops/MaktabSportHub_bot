@@ -4,7 +4,7 @@
   "description": "Maktab sport to'garaklari Telegram boti",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node $(find . -maxdepth 2 -name '*.js' -not -path './node_modules/*' | head -n 1)"
   },
   "engines": {
     "node": "22.x"
