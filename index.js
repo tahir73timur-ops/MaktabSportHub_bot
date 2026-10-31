@@ -6,7 +6,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const Database = require('better-sqlite3');
 
-// Bo'sh joy va qo'shtirnoqlarni olib tashlaymiz
+// Bo'sh joy va qo'shtirnoqlarni olib tashlaymiz (hostingda tez-tez uchraydigan xato)
 const TOKEN = (process.env.BOT_TOKEN || '').trim().replace(/^["']|["']$/g, '');
 const ADMIN_IDS = new Set(
   (process.env.ADMIN_IDS || '').split(',').map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number)
@@ -45,98 +45,38 @@ if (!hasCol('districts', 'region_id')) db.exec('ALTER TABLE districts ADD COLUMN
 if (!hasCol('users', 'birth_year')) db.exec('ALTER TABLE users ADD COLUMN birth_year INT');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_district ON districts(region_id, name)');
 
-// Boshlang'ich ma'lumotlar: Viloyatlar
-const REGIONS = [
-  "Qoraqalpog'iston Respublikasi", 'Toshkent shahri', 'Toshkent viloyati', 'Andijon viloyati',
-  'Buxoro viloyati', "Farg'ona viloyati", 'Jizzax viloyati', 'Namangan viloyati', 'Navoiy viloyati',
-  'Qashqadaryo viloyati', 'Samarqand viloyati', 'Sirdaryo viloyati', 'Surxondaryo viloyati', 'Xorazm viloyati',
+// Boshlang'ich ma'lumotlar: O'zbekiston viloyatlari, shahar va tumanlari
+// (rasmiy ro'yxat bilan solishtirib ko'ring; kamini /add_districts bilan to'ldirasiz)
+const D = (cities, districts) => [
+  ...cities.map((c) => `${c} shahri`),
+  ...districts.map((d) => `${d} tumani`),
 ];
-
-const TASHKENT_DISTRICTS = [
-  'Bektemir', 'Chilonzor', 'Yakkasaroy', 'Yashnobod', 'Mirobod', "Mirzo Ulug'bek",
-  'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot',
-];
-
-// Namangan viloyati tumanlari va ularning maktablar bazasi
-const NAMANGAN_DATA = {
-  'Pop tumani': [
-    'EduKontrol Academy (Pop)',
-    'Mirobod Center (Pop)',
-    ...Array.from({ length: 55 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
-    'Pop tuman 1-sonli Ixtisoslashtirilgan maktab'
-  ],
-  'Namangan shahri': [
-    ...Array.from({ length: 85 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
-    'Namangan shahar Prezident maktabi',
-    '1-sonli IDUM'
-  ],
-  'Chust tumani': [
-    ...Array.from({ length: 70 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`),
-    'Chust tuman Ixtisoslashtirilgan maktab'
-  ],
-  'Uychi tumani': [
-    ...Array.from({ length: 50 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Uchqoʻrgʻon tumani': [
-    ...Array.from({ length: 45 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Mingbuloq tumani': [
-    ...Array.from({ length: 40 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Kosonsoy tumani': [
-    ...Array.from({ length: 60 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Toʻraqoʻrgʻon tumani': [
-    ...Array.from({ length: 55 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Norin tumani': [
-    ...Array.from({ length: 42 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Yangiqoʻrgʻon tumani': [
-    ...Array.from({ length: 65 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Chortoq tumani': [
-    ...Array.from({ length: 58 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Davlatobod tumani': [
-    ...Array.from({ length: 25 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ],
-  'Yangi Namangan tumani': [
-    ...Array.from({ length: 20 }, (_, i) => `${i + 1}-sonli umumiy o'rta ta'lim maktabi`)
-  ]
+const SEED = {
+  "Qoraqalpog'iston Respublikasi": D(['Nukus', 'Taxiatosh'], ['Amudaryo', 'Beruniy', "Bo'zatov", 'Chimboy', "Ellikqal'a", 'Kegeyli', "Mo'ynoq", "Qanliko'l", "Qo'ng'irot", "Qorao'zak", 'Shumanay', "Taxtako'pir", "To'rtko'l", "Xo'jayli", 'Nukus']),
+  'Toshkent shahri': ['Bektemir', 'Chilonzor', 'Yakkasaroy', 'Yashnobod', 'Mirobod', "Mirzo Ulug'bek", 'Sergeli', 'Shayxontohur', 'Olmazor', 'Uchtepa', 'Yunusobod', 'Yangihayot'],
+  'Toshkent viloyati': D(['Nurafshon', 'Angren', 'Bekobod', 'Chirchiq', 'Olmaliq', 'Ohangaron', "Yangiyo'l"], ['Bekobod', "Bo'stonliq", "Bo'ka", 'Chinoz', 'Qibray', 'Ohangaron', "Oqqo'rg'on", 'Parkent', 'Piskent', 'Quyi Chirchiq', "O'rta Chirchiq", "Yangiyo'l", 'Yuqori Chirchiq', 'Zangiota', 'Toshkent']),
+  'Andijon viloyati': D(['Andijon', 'Xonobod'], ['Andijon', 'Asaka', 'Baliqchi', "Bo'z", 'Buloqboshi', 'Jalaquduq', 'Izboskan', "Qo'rg'ontepa", 'Marhamat', "Oltinko'l", 'Paxtaobod', "Ulug'nor", "Xo'jaobod", 'Shahrixon']),
+  'Buxoro viloyati': D(['Buxoro', 'Kogon'], ['Olot', 'Buxoro', "G'ijduvon", 'Jondor', 'Kogon', "Qorako'l", 'Qorovulbozor', 'Peshku', 'Romitan', 'Shofirkon', 'Vobkent']),
+  "Farg'ona viloyati": D(["Farg'ona", "Marg'ilon", "Qo'qon", 'Quvasoy'], ['Beshariq', "Bag'dod", 'Buvayda', "Dang'ara", "Farg'ona", 'Furqat', 'Oltiariq', "O'zbekiston", "Qo'shtepa", 'Quva', 'Rishton', "So'x", 'Toshloq', "Uchko'prik", 'Yozyovon']),
+  'Jizzax viloyati': D(['Jizzax'], ['Arnasoy', 'Baxmal', "Do'stlik", 'Forish', "G'allaorol", 'Sharof Rashidov', "Mirzacho'l", 'Paxtakor', 'Yangiobod', 'Zomin', 'Zafarobod', 'Zarbdor']),
+  'Namangan viloyati': D(['Namangan'], ['Chortoq', 'Chust', 'Kosonsoy', 'Mingbuloq', 'Namangan', 'Norin', 'Pop', "To'raqo'rg'on", "Uchqo'rg'on", 'Uychi', "Yangiqo'rg'on", 'Davlatobod']),
+  'Navoiy viloyati': D(['Navoiy', 'Zarafshon'], ['Karmana', 'Konimex', 'Qiziltepa', 'Navbahor', 'Nurota', 'Tomdi', 'Uchquduq', 'Xatirchi', 'Yangirabot']),
+  'Qashqadaryo viloyati': D(['Qarshi', 'Shahrisabz'], ['Chiroqchi', 'Dehqonobod', "G'uzor", 'Qamashi', 'Qarshi', 'Koson', 'Kasbi', 'Kitob', 'Mirishkor', 'Muborak', 'Nishon', 'Shahrisabz', "Yakkabog'", "Ko'kdala"]),
+  'Samarqand viloyati': D(['Samarqand', "Kattaqo'rg'on"], ["Bulung'ur", 'Jomboy', 'Ishtixon', "Kattaqo'rg'on", 'Narpay', 'Nurobod', 'Oqdaryo', 'Payariq', "Pastdarg'om", 'Paxtachi', 'Samarqand', 'Toyloq', 'Urgut', "Qo'shrabot"]),
+  'Sirdaryo viloyati': D(['Guliston', 'Yangiyer', 'Shirin'], ['Boyovut', 'Guliston', 'Mirzaobod', 'Oqoltin', 'Sardoba', 'Sayxunobod', 'Sirdaryo', 'Xovos']),
+  'Surxondaryo viloyati': D(['Termiz'], ['Angor', 'Bandixon', 'Boysun', 'Denov', "Jarqo'rg'on", 'Muzrabot', 'Oltinsoy', 'Qiziriq', "Qumqo'rg'on", 'Sariosiyo', 'Sherobod', "Sho'rchi", 'Termiz', 'Uzun']),
+  'Xorazm viloyati': D(['Urganch', 'Xiva'], ["Bog'ot", 'Gurlan', 'Xonqa', 'Hazorasp', 'Xiva', "Qo'shko'pir", 'Shovot', 'Urganch', 'Yangiariq', 'Yangibozor', "Tuproqqal'a"]),
 };
-
-if (!db.prepare('SELECT 1 FROM regions').get()) {
+{
   const insR = db.prepare('INSERT OR IGNORE INTO regions(name) VALUES(?)');
-  db.transaction(() => REGIONS.forEach((r) => insR.run(r)))();
-}
-
-// Toshkent shahrini kiritish
-const tash = db.prepare("SELECT id FROM regions WHERE name='Toshkent shahri'").get();
-if (tash) {
-  db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); 
-  if (!db.prepare('SELECT 1 FROM districts WHERE region_id=?').get(tash.id)) {
-    const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
-    db.transaction(() => TASHKENT_DISTRICTS.forEach((d) => insD.run(tash.id, d)))();
-  }
-}
-
-// Namangan viloyati va uning barcha tuman va maktablarini avtomatik joylash
-const namanganReg = db.prepare("SELECT id FROM regions WHERE name='Namangan viloyati'").get();
-if (namanganReg) {
-  const insDist = db.prepare('INSERT OR IGNORE INTO districts(region_id, name) VALUES(?, ?)');
-  const insSch = db.prepare('INSERT INTO schools(district_id, name) VALUES(?, ?)');
-
+  const insD = db.prepare('INSERT OR IGNORE INTO districts(region_id,name) VALUES(?,?)');
   db.transaction(() => {
-    for (const [distName, schoolList] of Object.entries(NAMANGAN_DATA)) {
-      insDist.run(namanganReg.id, distName);
-      const dist = db.prepare('SELECT id FROM districts WHERE region_id=? AND name=?').get(namanganReg.id, distName);
-      if (dist) {
-        const hasSchools = db.prepare('SELECT 1 FROM schools WHERE district_id=?').get(dist.id);
-        if (!hasSchools) {
-          schoolList.forEach((schName) => insSch.run(dist.id, schName));
-        }
-      }
+    for (const r of Object.keys(SEED)) insR.run(r);
+    const tash = db.prepare("SELECT id FROM regions WHERE name='Toshkent shahri'").get();
+    db.prepare('UPDATE districts SET region_id=? WHERE region_id IS NULL').run(tash.id); // eski bazadagi tumanlar
+    for (const [rname, list] of Object.entries(SEED)) {
+      const rid = db.prepare('SELECT id FROM regions WHERE name=?').get(rname).id;
+      for (const d of list) insD.run(rid, d); // takroriy qo'shilmaydi
     }
   })();
 }
@@ -164,11 +104,14 @@ const regionsKb = (prefix) =>
   inline(all('SELECT * FROM regions ORDER BY id').map((r) => [r.name, `${prefix}:${r.id}`]), 2);
 const districtsKb = (prefix, rid) =>
   inline(all('SELECT * FROM districts WHERE region_id=? ORDER BY name', rid).map((d) => [d.name, `${prefix}:${d.id}`]), 2);
+const gradeKb = () => inline(Array.from({ length: 11 }, (_, i) => [`${i + 1}-sinf`, `rgg:${i + 1}`]), 3);
+const letterKb = () =>
+  inline([...['A', 'B', 'V', 'G', 'D', 'E'].map((l) => [l, `rgl:${l}`]), ['Harfsiz', 'rgl:-']], 4);
 const replyLong = async (ctx, text) => {
   for (let i = 0; i < text.length; i += 3800) await ctx.reply(text.slice(i, i + 3800));
 };
 const schoolsKb = (prefix, did) =>
-  inline(all('SELECT * FROM schools WHERE district_id=?', did).map((s) => [s.name, `${prefix}:${s.id}`]), 2);
+  inline(all('SELECT * FROM schools WHERE district_id=?', did).map((s) => [s.name, `${prefix}:${s.id}`]));
 
 const states = new Map(); // tg_id -> { step, ...data }
 
@@ -242,16 +185,40 @@ bot.action(/^rgd:(\d+)$/, async (ctx) => {
   const st = states.get(ctx.from.id);
   if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
   const did = +ctx.match[1];
-  if (!one('SELECT 1 x FROM schools WHERE district_id=?', did)) return alert(ctx, 'Bu hududda maktablar kiritilmagan.');
-  await safeEdit(ctx, 'Maktabingizni tanlang:', schoolsKb('rgs', did));
+  const rows = all('SELECT * FROM schools WHERE district_id=? ORDER BY id', did).map((x) => [x.name, `rgs:${x.id}`]);
+  rows.push(["➕ Maktabim ro'yxatda yo'q", `rgn:${did}`]);
+  await safeEdit(ctx, 'Maktabingizni tanlang:', inline(rows, 2));
+});
+
+bot.action(/^rgn:(\d+)$/, async (ctx) => {
+  const st = states.get(ctx.from.id);
+  if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
+  st.district_id = +ctx.match[1];
+  st.step = 'reg_school';
+  await safeEdit(ctx, 'Maktabingiz raqamini (masalan: 45) yoki nomini yozing:');
 });
 
 bot.action(/^rgs:(\d+)$/, async (ctx) => {
   const st = states.get(ctx.from.id);
   if (!st?.name) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
   st.school_id = +ctx.match[1];
-  st.step = 'reg_grade';
-  await safeEdit(ctx, 'Sinfingizni kiriting (masalan: 8-A, 10-B yoki Oʻqituvchi):');
+  st.step = 'reg_wait';
+  await safeEdit(ctx, "Nechanchi sinfda o'qiysiz?", gradeKb());
+});
+
+bot.action(/^rgg:(\d+)$/, async (ctx) => {
+  const st = states.get(ctx.from.id);
+  if (!st?.school_id) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
+  st.gradeNum = +ctx.match[1];
+  await safeEdit(ctx, `${st.gradeNum}-sinf. Sinf harfini tanlang:`, letterKb());
+});
+
+bot.action(/^rgl:([A-Z-])$/, async (ctx) => {
+  const st = states.get(ctx.from.id);
+  if (!st?.school_id || !st.gradeNum) return alert(ctx, 'Sessiya tugagan. /start ni bosing.');
+  st.grade = ctx.match[1] === '-' ? `${st.gradeNum}-sinf` : `${st.gradeNum}-${ctx.match[1]}`;
+  st.step = 'reg_year';
+  await safeEdit(ctx, `Sinf: ${st.grade}\n\nEndi tug'ilgan yilingizni yozing (masalan: 2012):`);
 });
 
 // ───────────────────────── 1. To'garaklar ─────────────────────────
@@ -359,7 +326,7 @@ bot.hears('🤝 Young Coach', async (ctx) => {
     let text = '🤝 Sizning Young Coach faoliyatingiz:\n';
     const rows = [];
     for (const a of mine) {
-      text += `\n${a.sport} — ${YC_STATUS[a.status]}, o'tkazilgan mashg'ulot: ${a.sessions}`;
+      text += `\n• ${a.sport} — ${YC_STATUS[a.status]}, o'tkazilgan mashg'ulot: ${a.sessions}`;
       if (a.status === 'approved') rows.push([`✅ ${a.sport}: mashg'ulot o'tkazdim`, `ycl:${a.id}`]);
     }
     await ctx.reply(text, rows.length ? inline(rows) : undefined);
@@ -525,7 +492,7 @@ bot.action(/^rk:(result|achievement)$/, async (ctx) => {
   await safeEdit(ctx, 'Musobaqa / yutuq nomini yozing (bekor qilish: /cancel):');
 });
 
-// ───────────────────────── Matnli javoblar ─────────────────────────
+// ───────────────────────── Matnli javoblar (holatlar) ─────────────────────────
 bot.on('text', async (ctx, next) => {
   const st = states.get(ctx.from.id);
   const text = ctx.message.text.trim();
@@ -538,7 +505,20 @@ bot.on('text', async (ctx, next) => {
         return ctx.reply('Hozircha hududlar kiritilmagan. Administrator bilan bog\'laning.');
       }
       st.name = text.slice(0, 100);
+      st.step = 'reg_wait';
       return ctx.reply('Viloyatingizni tanlang:', regionsKb('rgr'));
+
+    case 'reg_school': {
+      if (!st.name || !st.district_id) {
+        states.delete(ctx.from.id);
+        return ctx.reply('Sessiya tugagan. /start ni bosing.');
+      }
+      const name = /^\d{1,4}$/.test(text) ? `${parseInt(text, 10)}-maktab` : text.slice(0, 60);
+      const ex1 = one('SELECT id FROM schools WHERE district_id=? AND name=?', st.district_id, name);
+      st.school_id = Number(ex1 ? ex1.id : run('INSERT INTO schools(district_id,name) VALUES(?,?)', st.district_id, name).lastInsertRowid);
+      st.step = 'reg_wait';
+      return ctx.reply(`🏫 ${name}\n\nNechanchi sinfda o'qiysiz?`, gradeKb());
+    }
 
     case 'reg_grade':
       if (!st.name || !st.school_id) {
@@ -603,7 +583,7 @@ bot.command('list', admin, async (ctx) => {
     text += `\n${r.id}. ${r.name}\n`;
     for (const d of all('SELECT * FROM districts WHERE region_id=? ORDER BY id', r.id)) {
       text += `   🏙 ${d.id}. ${d.name}\n`;
-      for (const sc of all('SELECT * FROM schools WHERE district_id=?', d.id)) text += `     🏫 ${sc.id}. ${sc.name}\n`;
+      for (const sc of all('SELECT * FROM schools WHERE district_id=?', d.id)) text += `      🏫 ${sc.id}. ${sc.name}\n`;
     }
   }
   text += "\n⚽ To'garaklar:\n" + all('SELECT * FROM clubs').map((c) => `${c.id}. ${c.sport} (maktab ${c.school_id})`).join('\n');
@@ -662,7 +642,7 @@ bot.command('add_comp', admin, async (ctx) => {
   let sent = 0;
   for (const u of all('SELECT u.tg_id FROM users u JOIN schools s ON s.id=u.school_id WHERE s.district_id=?', +p[0])) {
     if (await safeSend(u.tg_id, `🏆 Yangi musobaqa e'lon qilindi: ${p[1]} (${p[2]}). «Open Competition» bo'limidan yoziling!`)) sent++;
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 50)); // Telegram limitiga tushmaslik uchun
   }
   ctx.reply(`✅ Musobaqa e'lon qilindi. Xabar ${sent} ta o'quvchiga yuborildi.`);
 });
@@ -687,6 +667,11 @@ bot.command('comp_regs', admin, (ctx) => {
 });
 
 // ───────────────────────── Ishga tushirish ─────────────────────────
+// Render "Web Service" port ochiq bo'lishini talab qiladi (express shart emas)
+require('http')
+  .createServer((req, res) => { res.writeHead(200); res.end('Bot ishlayapti'); })
+  .listen(process.env.PORT || 3000);
+
 bot.catch((err, ctx) => console.error(`Xato (${ctx.updateType}):`, err));
 bot.telegram.getMe()
   .then((me) => {
@@ -702,33 +687,3 @@ bot.telegram.getMe()
 console.log('Bot ishga tushmoqda...');
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-// ... oldingi bot kodlari ...
-
-bot.telegram.getMe()
-  .then((me) => {
-    console.log(`Token to'g'ri ✅  @${me.username}`);
-    return bot.launch();
-  })
-  .catch((e) => {
-    if (e.response?.error_code === 401)
-      console.error("❌ 401 Unauthorized: BOT_TOKEN noto'g'ri yoki bekor qilingan. @BotFather dan yangi token oling.");
-    else console.error('❌ Ishga tushmadi:', e.message);
-    process.exit(1);
-  });
-console.log('Bot ishga tushmoqda...');
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
-// ── MANA SHU YERGA (ENG OXIRIGA) QO'YASIZ ──
-const express = require('express');
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-  res.send('Bot ishlayapti!');
-});
-
-app.listen(PORT, () => {
-  console.log(`Server ${PORT} - portda ishga tushdi`);
-});
